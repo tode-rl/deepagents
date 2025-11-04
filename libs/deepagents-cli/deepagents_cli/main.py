@@ -89,12 +89,19 @@ def parse_args():
         action="store_true",
         help="Auto-approve tool usage without prompting (disables human-in-the-loop)",
     )
+    parser.add_argument(
+        "prompt",
+        nargs="?",
+        help="Optional prompt to execute before entering interactive mode",
+    )
 
     return parser.parse_args()
 
 
-async def simple_cli(agent, assistant_id: str | None, session_state, baseline_tokens: int = 0):
-    """Main CLI loop."""
+async def simple_cli(
+    agent, assistant_id: str | None, session_state, baseline_tokens: int = 0, initial_prompt: str | None = None
+) -> dict | None:
+    """Main CLI loop. Returns dict for special actions (like model switching), None otherwise."""
     console.clear()
     console.print(DEEP_AGENTS_ASCII, style=f"bold {COLORS['primary']}")
     console.print()
@@ -133,6 +140,11 @@ async def simple_cli(agent, assistant_id: str | None, session_state, baseline_to
     token_tracker = TokenTracker()
     token_tracker.set_baseline(baseline_tokens)
 
+    # Execute initial prompt if provided
+    if initial_prompt:
+        console.print(f"[bold {COLORS['user']}]>[/bold {COLORS['user']}] {initial_prompt}")
+        execute_task(initial_prompt, agent, assistant_id, session_state, token_tracker)
+
     while True:
         try:
             user_input = await session.prompt_async()
@@ -153,6 +165,9 @@ async def simple_cli(agent, assistant_id: str | None, session_state, baseline_to
             if result == "exit":
                 console.print("\nGoodbye!", style=COLORS["primary"])
                 break
+            if isinstance(result, dict):
+                # Special action (like model switching) - return to caller
+                return result
             if result:
                 # Command was handled, continue to next input
                 continue
@@ -170,10 +185,10 @@ async def simple_cli(agent, assistant_id: str | None, session_state, baseline_to
         execute_task(user_input, agent, assistant_id, session_state, token_tracker)
 
 
-async def main(assistant_id: str, session_state):
-    """Main entry point."""
-    # Create the model (checks API keys)
-    model = create_model()
+async def main(assistant_id: str, session_state, initial_prompt: str | None = None) -> dict | None:
+    """Main entry point. Returns dict for special actions (like model switching), None otherwise."""
+    # Create the model (checks API keys), using preferred_provider if set
+    model = create_model(session_state.preferred_provider)
 
     # Create agent with conditional tools
     tools = [http_request]
@@ -191,9 +206,10 @@ async def main(assistant_id: str, session_state):
     baseline_tokens = calculate_baseline_tokens(model, agent_dir, system_prompt)
 
     try:
-        await simple_cli(agent, assistant_id, session_state, baseline_tokens)
+        return await simple_cli(agent, assistant_id, session_state, baseline_tokens, initial_prompt)
     except Exception as e:
         console.print(f"\n[bold red]❌ Error:[/bold red] {e}\n")
+        return None
 
 
 def cli_main():
@@ -214,8 +230,31 @@ def cli_main():
             # Create session state from args
             session_state = SessionState(auto_approve=args.auto_approve)
 
-            # API key validation happens in create_model()
-            asyncio.run(main(args.agent, session_state))
+            # Main loop to handle model switching
+            initial_prompt = args.prompt
+            while True:
+                # API key validation happens in create_model()
+                result = asyncio.run(main(args.agent, session_state, initial_prompt))
+
+                # Clear initial_prompt after first run so it doesn't re-execute
+                initial_prompt = None
+
+                # Check if we need to recreate agent with new model
+                if isinstance(result, dict) and result.get("action") == "recreate":
+                    provider = result.get("provider")
+                    session_state.preferred_provider = provider
+                    console.print()
+                    console.print(
+                        f"[bold {COLORS['primary']}]Switching to {provider}...[/bold {COLORS['primary']}]"
+                    )
+                    console.print(
+                        "[dim]Conversation cleared, /memories/ preserved.[/dim]", style=COLORS["dim"]
+                    )
+                    console.print()
+                    # Loop will recreate agent with new provider
+                    continue
+                # Normal exit or error - break the loop
+                break
     except KeyboardInterrupt:
         # Clean exit on Ctrl+C - suppress ugly traceback
         console.print("\n\n[yellow]Interrupted[/yellow]")

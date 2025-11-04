@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 import dotenv
+from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from rich.console import Console
 
 dotenv.load_dotenv()
@@ -40,6 +42,7 @@ DEEP_AGENTS_ASCII = """
 COMMANDS = {
     "clear": "Clear screen and reset conversation",
     "help": "Show help information",
+    "model": "Switch between OpenAI and Anthropic models",
     "tokens": "Show token usage for current session",
     "quit": "Exit the CLI",
     "exit": "Exit the CLI",
@@ -79,8 +82,9 @@ console = Console(highlight=False)
 class SessionState:
     """Holds mutable session state (auto-approve mode, etc)."""
 
-    def __init__(self, auto_approve: bool = False):
+    def __init__(self, auto_approve: bool = False, preferred_provider: str | None = None):
         self.auto_approve = auto_approve
+        self.preferred_provider = preferred_provider
 
     def toggle_auto_approve(self) -> bool:
         """Toggle auto-approve and return new state."""
@@ -98,8 +102,54 @@ def get_default_coding_instructions() -> str:
     return default_prompt_path.read_text()
 
 
-def create_model():
+def _create_openai_model():
+    """Create an OpenAI model instance."""
+    model_name = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+    console.print(f"[dim]Using OpenAI model: {model_name}[/dim]")
+    return ChatOpenAI(
+        model=model_name,
+        temperature=0.7,
+    )
+
+
+def _create_anthropic_model():
+    """Create an Anthropic model instance."""
+    model_name = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+    console.print(f"[dim]Using Anthropic model: {model_name}[/dim]")
+    return ChatAnthropic(
+        model_name=model_name,
+        max_tokens=20000,
+    )
+
+
+def _show_api_key_error(provider: str | None = None):
+    """Show error message for missing API key and exit."""
+    if provider == "openai":
+        console.print("[bold red]Error:[/bold red] OPENAI_API_KEY not configured.")
+        console.print("\nPlease set your OpenAI API key:")
+        console.print("  export OPENAI_API_KEY=your_api_key_here")
+    elif provider == "anthropic":
+        console.print("[bold red]Error:[/bold red] ANTHROPIC_API_KEY not configured.")
+        console.print("\nPlease set your Anthropic API key:")
+        console.print("  export ANTHROPIC_API_KEY=your_api_key_here")
+    else:
+        console.print("[bold red]Error:[/bold red] No API key configured.")
+        console.print("\nPlease set one of the following environment variables:")
+        console.print("  - OPENAI_API_KEY     (for OpenAI models like gpt-5-mini)")
+        console.print("  - ANTHROPIC_API_KEY  (for Claude models)")
+        console.print("\nExample:")
+        console.print("  export OPENAI_API_KEY=your_api_key_here")
+    
+    console.print("\nOr add it to your .env file.")
+    sys.exit(1)
+
+
+def create_model(force_provider: str | None = None):
     """Create the appropriate model based on available API keys.
+
+    Args:
+        force_provider: Optional provider to force ("openai" or "anthropic").
+                       If specified, only that provider will be used.
 
     Returns:
         ChatModel instance (OpenAI or Anthropic)
@@ -110,29 +160,21 @@ def create_model():
     openai_key = os.environ.get("OPENAI_API_KEY")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
 
+    # Determine which provider to use
+    if force_provider == "openai":
+        if not openai_key:
+            _show_api_key_error("openai")
+        return _create_openai_model()
+    
+    if force_provider == "anthropic":
+        if not anthropic_key:
+            _show_api_key_error("anthropic")
+        return _create_anthropic_model()
+
+    # Default behavior: prefer OpenAI, fallback to Anthropic
     if openai_key:
-        from langchain_openai import ChatOpenAI
-
-        model_name = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-        console.print(f"[dim]Using OpenAI model: {model_name}[/dim]")
-        return ChatOpenAI(
-            model=model_name,
-            temperature=0.7,
-        )
+        return _create_openai_model()
     if anthropic_key:
-        from langchain_anthropic import ChatAnthropic
-
-        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
-        console.print(f"[dim]Using Anthropic model: {model_name}[/dim]")
-        return ChatAnthropic(
-            model_name=model_name,
-            max_tokens=20000,
-        )
-    console.print("[bold red]Error:[/bold red] No API key configured.")
-    console.print("\nPlease set one of the following environment variables:")
-    console.print("  - OPENAI_API_KEY     (for OpenAI models like gpt-5-mini)")
-    console.print("  - ANTHROPIC_API_KEY  (for Claude models)")
-    console.print("\nExample:")
-    console.print("  export OPENAI_API_KEY=your_api_key_here")
-    console.print("\nOr add it to your .env file.")
-    sys.exit(1)
+        return _create_anthropic_model()
+    
+    _show_api_key_error()

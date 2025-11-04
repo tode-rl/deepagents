@@ -414,13 +414,13 @@ def show_help():
     console.print()
 
     console.print("[bold]Usage:[/bold]", style=COLORS["primary"])
-    console.print("  deepagents [--agent NAME] [--auto-approve]     Start interactive session")
-    console.print("  deepagents list                                List all available agents")
-    console.print("  deepagents reset --agent AGENT                 Reset agent to default prompt")
+    console.print("  deepagents [--agent NAME] [--auto-approve] [PROMPT]  Start interactive session")
+    console.print("  deepagents list                                       List all available agents")
+    console.print("  deepagents reset --agent AGENT                        Reset agent to default prompt")
     console.print(
-        "  deepagents reset --agent AGENT --target SOURCE Reset agent to copy of another agent"
+        "  deepagents reset --agent AGENT --target SOURCE        Reset agent to copy of another agent"
     )
-    console.print("  deepagents help                                Show this help message")
+    console.print("  deepagents help                                       Show this help message")
     console.print()
 
     console.print("[bold]Examples:[/bold]", style=COLORS["primary"])
@@ -433,6 +433,10 @@ def show_help():
     )
     console.print(
         "  deepagents --auto-approve               # Start with auto-approve enabled",
+        style=COLORS["dim"],
+    )
+    console.print(
+        '  deepagents "create hello.py"            # Execute prompt then enter interactive mode',
         style=COLORS["dim"],
     )
     console.print(
@@ -481,6 +485,7 @@ def show_help():
     console.print("[bold]Interactive Commands:[/bold]", style=COLORS["primary"])
     console.print("  /help           Show available commands and features", style=COLORS["dim"])
     console.print("  /clear          Clear screen and reset conversation", style=COLORS["dim"])
+    console.print("  /model          Switch between OpenAI and Anthropic models", style=COLORS["dim"])
     console.print("  /tokens         Show token usage for current session", style=COLORS["dim"])
     console.print("  /quit, /exit    Exit the session", style=COLORS["dim"])
     console.print(

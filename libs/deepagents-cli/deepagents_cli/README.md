@@ -26,9 +26,14 @@ cli/
 - **Purpose**: CLI entry point, argument parsing, main interactive loop
 - **Key Functions**:
   - `cli_main()` - Console script entry point (called when you run `deepagents`)
+    - Wraps `main()` in a loop to support model switching
   - `main()` - Async main function that orchestrates agent creation and CLI
+    - Returns dict for special actions (like model switching)
   - `simple_cli()` - Main interactive loop handling user input
+    - Executes optional initial prompt before entering interactive mode
+    - Returns dict signals for actions like model recreation
   - `parse_args()` - Command-line argument parsing
+    - Accepts optional positional `prompt` argument for piping prompts
   - `check_cli_dependencies()` - Validates required packages are installed
 
 ### `config.py` - Configuration & Constants
@@ -39,7 +44,9 @@ cli/
   - `COMMANDS` - Available slash commands
   - `COMMON_BASH_COMMANDS` - Autocomplete options for bash commands
   - `console` - Rich Console instance
-  - `create_model()` - Creates OpenAI or Anthropic model based on API keys
+  - `SessionState` - Holds mutable session state (auto-approve, preferred_provider)
+  - `create_model(force_provider)` - Creates OpenAI or Anthropic model based on API keys
+    - Optional `force_provider` parameter to switch between "openai" and "anthropic"
   - `get_default_coding_instructions()` - Loads default agent prompt
 
 ### `tools.py` - Custom Agent Tools
@@ -73,9 +80,11 @@ cli/
     - External editor support (Ctrl+E)
 
 ### `commands.py` - Command Handlers
-- **Purpose**: Handle slash commands (`/help`, `/clear`, etc.) and bash execution
+- **Purpose**: Handle slash commands (`/help`, `/clear`, `/model`, etc.) and bash execution
 - **Key Functions**:
   - `handle_command()` - Route and execute slash commands
+    - Returns dict with `{"action": "recreate", "provider": "..."}` for model switching
+    - Returns `"exit"` to exit, `True` if handled, `False` to pass to agent
   - `execute_bash_command()` - Execute bash commands prefixed with `!`
 
 ### `execution.py` - Task Execution & Streaming
@@ -127,14 +136,44 @@ Display output via ui.py (TokenTracker, console)
 
 ## Key Features
 
+### Command-Line Prompt Execution
+Pass a prompt as a command-line argument to execute it and then enter interactive mode:
+```bash
+deepagents "create a hello.py file"
+deepagents --agent mybot "review the last commit"
+```
+
+This is useful for:
+- Quick tasks that you want to follow up on
+- Starting a session with initial context
+- Automating the first step of a workflow
+
 ### File Context Injection
 Type `@filename` and press Tab to autocomplete and inject file content into your prompt.
 
 ### Interactive Commands
 - `/help` - Show help
 - `/clear` - Clear screen and reset conversation
+- `/model <provider>` - Switch between OpenAI and Anthropic models
+  - Usage: `/model openai` or `/model anthropic`
+  - Clears conversation but preserves `/memories/`
+  - Requires appropriate API key
 - `/tokens` - Show token usage
 - `/quit` or `/exit` - Exit the CLI
+
+### Model Switching
+Switch between OpenAI and Anthropic on the fly during your session:
+```
+> /model anthropic
+Switching to anthropic...
+Conversation cleared, /memories/ preserved.
+```
+
+The model switch:
+- Recreates the agent with the new provider
+- Clears the conversation state (new InMemorySaver)
+- Preserves long-term memory in `/memories/`
+- Updates SessionState.preferred_provider to maintain choice
 
 ### Bash Commands
 Type `!command` to execute bash commands directly (e.g., `!ls`, `!git status`)
@@ -181,9 +220,13 @@ To modify the CLI:
 # From project root
 uv run python -m deepagents.cli
 
+# With initial prompt
+uv run python -m deepagents.cli "analyze this codebase"
+
 # Or install in editable mode
 uv pip install -e .
 deepagents
+deepagents "create a test file"
 ```
 
 ## Entry Point
