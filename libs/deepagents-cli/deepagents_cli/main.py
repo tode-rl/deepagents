@@ -7,7 +7,15 @@ from pathlib import Path
 
 from .agent import create_agent_with_config, list_agents, reset_agent
 from .commands import execute_bash_command, handle_command
-from .config import COLORS, DEEP_AGENTS_ASCII, SessionState, console, create_model
+from .config import (
+    COLORS,
+    DEEP_AGENTS_ASCII,
+    SessionState,
+    console,
+    create_model,
+    load_agent_config,
+    save_agent_config,
+)
 from .execution import execute_task
 from .input import create_prompt_session
 from .tools import http_request, tavily_client, web_search
@@ -57,6 +65,58 @@ def check_cli_dependencies():
 
 def parse_args():
     """Parse command line arguments."""
+    # Check if we have a subcommand or interactive mode with prompt
+    # Strategy: Look at the arguments to determine which parser to use
+    known_commands = {"list", "help", "reset"}
+
+    # Scan through argv to find first argument that's not an option or option value
+    # We need to skip --option value pairs
+    skip_next = False
+    first_positional = None
+
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+
+        if arg.startswith("-"):
+            # Check if this option takes a value (--agent, but not --auto-approve)
+            if arg in ["--agent", "--target"]:
+                skip_next = True
+            continue
+
+        # Found first positional argument
+        first_positional = arg
+        break
+
+    # Determine which parser to use
+    use_subparser = first_positional is None or first_positional in known_commands
+
+    if not use_subparser:
+        # Interactive mode with prompt - use simple parser
+        parser = argparse.ArgumentParser(
+            description="DeepAgents - AI Coding Assistant",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            add_help=False,
+        )
+        parser.add_argument(
+            "--agent",
+            default="agent",
+            help="Agent identifier for separate memory stores (default: agent).",
+        )
+        parser.add_argument(
+            "--auto-approve",
+            action="store_true",
+            help="Auto-approve tool usage without prompting (disables human-in-the-loop)",
+        )
+        parser.add_argument(
+            "prompt",
+            nargs="?",
+            help="Optional prompt to execute before entering interactive mode",
+        )
+        return parser.parse_args()
+
+    # Use parser with subcommands
     parser = argparse.ArgumentParser(
         description="DeepAgents - AI Coding Assistant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -78,7 +138,7 @@ def parse_args():
         "--target", dest="source_agent", help="Copy prompt from another agent"
     )
 
-    # Default interactive mode
+    # Default interactive mode arguments (for when no subcommand is given)
     parser.add_argument(
         "--agent",
         default="agent",
@@ -220,15 +280,24 @@ def cli_main():
     try:
         args = parse_args()
 
-        if args.command == "help":
+        # Check if we have a subcommand (command attribute only exists when using subparser)
+        command = getattr(args, "command", None)
+
+        if command == "help":
             show_help()
-        elif args.command == "list":
+        elif command == "list":
             list_agents()
-        elif args.command == "reset":
+        elif command == "reset":
             reset_agent(args.agent, args.source_agent)
         else:
-            # Create session state from args
-            session_state = SessionState(auto_approve=args.auto_approve)
+            # Load agent config to get preferences
+            agent_config = load_agent_config(args.agent)
+
+            # Create session state from args and config
+            preferred_provider = agent_config.get("preferred_provider")
+            session_state = SessionState(
+                auto_approve=args.auto_approve, preferred_provider=preferred_provider
+            )
 
             # Main loop to handle model switching
             initial_prompt = args.prompt
@@ -243,6 +312,10 @@ def cli_main():
                 if isinstance(result, dict) and result.get("action") == "recreate":
                     provider = result.get("provider")
                     session_state.preferred_provider = provider
+
+                    # Save preference to config
+                    save_agent_config(args.agent, {"preferred_provider": provider})
+
                     console.print()
                     console.print(
                         f"[bold {COLORS['primary']}]Switching to {provider}...[/bold {COLORS['primary']}]"

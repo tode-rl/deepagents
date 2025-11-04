@@ -176,5 +176,56 @@ def create_model(force_provider: str | None = None):
         return _create_openai_model()
     if anthropic_key:
         return _create_anthropic_model()
-    
+
     _show_api_key_error()
+
+
+def load_agent_config(agent_name: str) -> dict:
+    """Load agent configuration from config.json.
+
+    Args:
+        agent_name: Name of the agent
+
+    Returns:
+        Dictionary with config data, empty dict if file doesn't exist
+    """
+    import json
+    from pathlib import Path
+
+    config_path = Path.home() / ".deepagents" / agent_name / "config.json"
+
+    if not config_path.exists():
+        return {}
+
+    try:
+        with open(config_path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        # If file is corrupted or unreadable, return empty config
+        return {}
+
+
+def save_agent_config(agent_name: str, config_data: dict) -> None:
+    """Save agent configuration to config.json.
+
+    Args:
+        agent_name: Name of the agent
+        config_data: Dictionary to save as JSON
+    """
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    agent_dir = Path.home() / ".deepagents" / agent_name
+    agent_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = agent_dir / "config.json"
+
+    # Add timestamp
+    config_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        with open(config_path, "w") as f:
+            json.dump(config_data, f, indent=2)
+    except IOError as e:
+        console.print(f"[yellow]Warning: Could not save config: {e}[/yellow]")
